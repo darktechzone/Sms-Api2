@@ -11,8 +11,8 @@ CORS(app, origins="*", supports_credentials=True)   # wide open CORS
 
 # ---------- Environment ----------
 BASE_URL = os.environ.get("PANEL_BASE_URL", "http://54.39.104.241/ints")
-USERNAME = os.environ.get("PANEL_USER", "Ahmad056")
-PASSWORD = os.environ.get("PANEL_PASS", "Ahmad056")
+USERNAME = os.environ.get("PANEL_USER", "DarkTechZone32")
+PASSWORD = os.environ.get("PANEL_PASS", "DarkTechZone32")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36",
