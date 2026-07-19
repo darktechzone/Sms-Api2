@@ -20,7 +20,7 @@ from urllib3.util.retry import Retry
 app = Flask(__name__)
 CORS(app, origins="*", supports_credentials=True)
 
-# ---------- CONFIG (exact match to app (4).js) ----------
+# ---------- CONFIG ----------
 BASE_URL = os.environ.get("PANEL_BASE_URL", "http://51.89.99.105/NumberPanel")
 USERNAME = os.environ.get("PANEL_USER", "dtz786")
 PASSWORD = os.environ.get("PANEL_PASS", "dtz786")
@@ -33,7 +33,7 @@ HEADERS = {
     "Accept": "application/json, text/plain, */*"
 }
 
-# ---------- STATE (exact match to app (4).js) ----------
+# ---------- STATE ----------
 session = None          # requests.Session() with cookie jar
 sesskey = None
 last_login = 0
@@ -56,7 +56,6 @@ def add_log(message):
         log_messages.pop(0)
 
 # ---------- FULL COUNTRY MAP & FLAG MAP ----------
-# (Same as app (4).js – all countries)
 COUNTRY_MAP = {
     '1': {'code': '+1', 'name': 'USA/Canada'},
     '7': {'code': '+7', 'name': 'Russia'},
@@ -322,7 +321,7 @@ FLAG_MAP = {
     'Uzbekistan': '🇺🇿'
 }
 
-# ---------- HELPERS (same as Node.js) ----------
+# ---------- HELPERS ----------
 def get_cookie_from_headers(headers):
     set_cookie = headers.get('set-cookie')
     if not set_cookie:
@@ -381,7 +380,7 @@ def extract_otp(text):
                 return m.group(1)
     return None
 
-# ---------- SESSION MANAGEMENT (exact Node.js logic) ----------
+# ---------- SESSION MANAGEMENT ----------
 def create_session_with_retries():
     sess = requests.Session()
     retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
@@ -564,7 +563,7 @@ def validate_session():
         add_log(f"Validation error: {e}")
         return False
 
-# ---------- FETCH FUNCTIONS WITH CIRCUIT BREAKER ----------
+# ---------- FETCH FUNCTIONS ----------
 def fetch_with_circuit_breaker(url, method='GET', headers=None, params=None, data=None):
     global consecutive_failures
     if consecutive_failures >= FAILURE_THRESHOLD:
