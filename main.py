@@ -15,6 +15,7 @@ CORS(app, origins="*", supports_credentials=True)
 BASE_URL = os.environ.get("PANEL_BASE_URL", "http://51.89.99.105/NumberPanel")
 USERNAME = os.environ.get("PANEL_USER", "dtz786")
 PASSWORD = os.environ.get("PANEL_PASS", "dtz786")
+SESSKEY_OVERRIDE = os.environ.get("SESSKEY_OVERRIDE", None)  # for manual override
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36",
@@ -46,7 +47,7 @@ def add_log(message):
     if len(log_messages) > MAX_LOGS:
         log_messages.pop(0)
 
-# ---------- FULL COUNTRY MAP (complete) ----------
+# ---------- FULL COUNTRY MAP ----------
 COUNTRY_MAP = {
     '1': {'code': '+1', 'name': 'USA/Canada'},
     '7': {'code': '+7', 'name': 'Russia'},
@@ -378,43 +379,60 @@ def create_session_with_retries():
     return sess
 
 def extract_sesskey_from_html(html):
-    """Try multiple patterns to find sesskey in the HTML."""
+    """Extract sesskey from HTML using various patterns."""
     patterns = [
         r'data_smscdr\.php[^"]*sesskey=([^&"\s]+)',
         r'data_smsnumbers\.php[^"]*sesskey=([^&"\s]+)',
         r'sesskey=([^&\s"\']+)',
         r'var\s+sesskey\s*=\s*["\']([^"\']+)["\'];',
         r'SESSKEY\s*[:=]\s*["\']?([a-zA-Z0-9+/=]+)["\']?',
-        r'"sesskey":"([^"]+)"',              # JSON style
-        r'"sesskey":"([a-zA-Z0-9]+)"',       # numeric/alphanumeric
+        r'"sesskey":"([^"]+)"',
+        r'"sesskey":"([a-zA-Z0-9]+)"',
+        # specifically look for numeric sesskey like in the otps.html
+        r'sesskey=([0-9]+)',
+        r'sesskey\s*=\s*([0-9]+)',
     ]
     for pat in patterns:
         m = re.search(pat, html, re.IGNORECASE)
         if m:
             return m.group(1)
+    # If still not found, try to find the DataTable initialization line
+    dt_match = re.search(r'\$\(\'#dt\'\)\.dataTable\(\{[^}]*sAjaxSource:\s*"([^"]+)"', html, re.DOTALL)
+    if dt_match:
+        ajax_url = dt_match.group(1)
+        # extract sesskey from that URL
+        sk_match = re.search(r'sesskey=([^&"\s]+)', ajax_url)
+        if sk_match:
+            return sk_match.group(1)
     return None
 
 def fetch_sesskey():
     global sesskey
-    # Try to get sesskey from stats page
+    # If override is set, use it immediately
+    if SESSKEY_OVERRIDE:
+        sesskey = SESSKEY_OVERRIDE
+        add_log(f"Sesskey override set to: {sesskey}")
+        return True
+
+    # Try stats page
     try:
         url = f"{BASE_URL}/client/SMSCDRStats"
         headers = {**HEADERS, "Referer": url}
-        # No manual Cookie header – session handles it
         resp = session.get(url, headers=headers, timeout=10)
         if resp.status_code == 200:
             found = extract_sesskey_from_html(resp.text)
             if found:
                 sesskey = found
-                add_log(f"Sesskey found: {sesskey}")
+                add_log(f"Sesskey found on stats page: {sesskey}")
                 return True
             else:
-                add_log("Sesskey not found in stats page")
+                add_log("Sesskey not found in stats page (trying numbers page)")
         else:
-            add_log(f"Sesskey fetch failed: {resp.status_code}")
+            add_log(f"Stats page returned {resp.status_code}")
     except Exception as e:
-        add_log(f"Sesskey error: {e}")
-    # If not found, try numbers page
+        add_log(f"Error fetching stats page: {e}")
+
+    # Try numbers page
     try:
         url = f"{BASE_URL}/client/MySMSNumbers"
         headers = {**HEADERS, "Referer": url}
@@ -425,8 +443,13 @@ def fetch_sesskey():
                 sesskey = found
                 add_log(f"Sesskey found on numbers page: {sesskey}")
                 return True
-    except Exception:
-        pass
+            else:
+                add_log("Sesskey not found in numbers page")
+        else:
+            add_log(f"Numbers page returned {resp.status_code}")
+    except Exception as e:
+        add_log(f"Error fetching numbers page: {e}")
+
     sesskey = None
     add_log("Sesskey not found – continuing without it")
     return False
@@ -472,7 +495,7 @@ def login():
                         signin_url,
                         data=data,
                         headers=headers_post,
-                        allow_redirects=True,          # follow redirects
+                        allow_redirects=True,
                         timeout=10
                     )
                     add_log(f"POST /signin status: {r2.status_code}")
@@ -482,14 +505,13 @@ def login():
                         time.sleep(3)
                         continue
 
-                    # Check if we are logged in by looking for "logout" or dashboard content
+                    # Check if logged in
                     if "logout" in r2.text.lower() or "dashboard" in r2.text.lower() or r2.status_code == 200:
                         last_login = time.time()
                         add_log("Login successful")
                         success = True
                         break
                     elif r2.status_code in (302, 301):
-                        # Redirect often means success, but we already followed it
                         last_login = time.time()
                         add_log("Login successful (redirect followed)")
                         success = True
@@ -502,7 +524,7 @@ def login():
                 session = None
                 return False
 
-            # Fetch sesskey from stats page
+            # Fetch sesskey
             fetch_sesskey()
             return True
         except Exception as e:
@@ -515,7 +537,7 @@ def ensure_session():
     if not session or (time.time() - last_login) > 3600:
         add_log("Session expired, re-logging...")
         return login()
-    # If sesskey missing, try to fetch it (but don't re-login)
+    # If sesskey missing, try to fetch it
     if sesskey is None:
         fetch_sesskey()
     return True
@@ -538,7 +560,6 @@ def fetch_numbers():
     try:
         url = f"{BASE_URL}/client/res/data_smsnumbers.php"
         headers = {**HEADERS, "Referer": f"{BASE_URL}/client/MySMSNumbers"}
-        # No manual Cookie – session handles it
         resp = session.get(url, headers=headers, params=params, timeout=15)
         if resp.status_code != 200:
             add_log(f"Numbers fetch HTTP {resp.status_code}")
@@ -701,7 +722,7 @@ def logs():
 @app.route("/")
 def root():
     return jsonify({
-        "message": "NumberPanel API – Fixed Session",
+        "message": "NumberPanel API – Enhanced Sesskey Extraction",
         "endpoints": ["/numbers", "/sms", "/debug", "/logs"],
         "status": "online"
     })
